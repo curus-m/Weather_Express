@@ -1,27 +1,63 @@
-var createError = require('http-errors');
-var express = require('express');
-var path = require('path');
-var cookieParser = require('cookie-parser');
-var logger = require('morgan');
-
-var indexRouter = require('./routes/index');
-var usersRouter = require('./routes/users');
-
-var app = express();
-
+const createError = require('http-errors');
+const express = require('express');
+const path = require('path');
+const cookieParser = require('cookie-parser');
+const schedule = require('node-schedule');
+const temperature = require('./bin/temperature');
+const { graphqlHTTP } = require('express-graphql');
+const graphqlSchema = require('./bin/graphql/schema');
+const graphqlResolver = require('./bin/graphql/resolver');
+const weather = require('./bin/weather');
+const indexRouter = require('./routes/index');
+const app = express();
+const logger = require('./bin/logger');
+const env = app.get('env');
+const moment = require('moment');
+const config = require('./bin/config');
 // view engine setup
 app.set('views', path.join(__dirname, 'views'));
 app.set('view engine', 'jade');
-
-app.use(logger('dev'));
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.use('/', indexRouter);
-app.use('/users', usersRouter);
 
+// set temperature check
+const addTemperatureJob = schedule.scheduleJob("0 */20 * * * *", async function () {
+  if(env == "production") {
+    temperature.addTempData();
+  } else {
+    logger.info("thermometer check skipped on"+ moment().format(config.dateString.temperature));
+  }
+});
+
+const addWeatherJob = schedule.scheduleJob("0 0 9 * * *", async function () {
+  if(env == "production") {
+    weather.addWeatherData();
+  } else {
+    logger.info("weather check skipped on"+ moment().format(config.dateString.temperature));
+  }
+}); 
+
+//setup graphQL
+app.use(
+  '/temperature',
+  graphqlHTTP({
+    schema: graphqlSchema,
+    rootValue: graphqlResolver,
+    graphiql: env === 'development'
+  }),
+);
+app.use(
+  '/weather',
+  graphqlHTTP({
+    schema: graphqlSchema,
+    rootValue: graphqlResolver,
+    graphiql: env === 'development'
+  }),
+);
 // catch 404 and forward to error handler
 app.use(function(req, res, next) {
   next(createError(404));
